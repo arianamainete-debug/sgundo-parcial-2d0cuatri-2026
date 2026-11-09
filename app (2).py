@@ -1,0 +1,890 @@
+# -*- coding: utf-8 -*-
+import io
+
+import numpy as np
+import requests
+import pandas as pd
+import streamlit as st
+from mercado import top_fci, top_mercado, CEDEARS, ACCIONES, SinDatos
+
+st.set_page_config(page_title="Asesor Financiero", page_icon=None, layout="wide")
+
+# ───────────────────────── Diseño (oscuro, minimalista, con transiciones tipo diapositivas) ─────────────────────────
+ESTILO = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500&family=Roboto:wght@300;400;500&display=swap');
+html { scroll-behavior: smooth; }
+.stApp { background: #0a0a0a; }
+.stApp, .stApp p, .stApp li, .stApp label, .stApp div, .stApp td, .stApp th, .stApp span:not([data-testid="stIconMaterial"]) {
+    font-family: 'Roboto', sans-serif; color: #e8e8e8; }
+[data-testid="stIconMaterial"] { font-family: 'Material Symbols Rounded', 'Material Symbols Outlined' !important; color: #cfcfcf !important; }
+.stApp h1, .stApp h2, .stApp h3, .stApp h4 { font-family: 'Outfit', sans-serif; font-weight: 300; font-style: italic; color: #ffffff; letter-spacing: -0.01em; }
+header[data-testid="stHeader"] { background: transparent; }
+[data-testid="stToolbar"], footer { visibility: hidden; }
+.block-container { max-width: 1060px; padding-top: 6rem; padding-bottom: 5rem; overflow-x: hidden; }
+hr { border-color: #1b1b1b !important; }
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * { color: #b4b4b4 !important; }
+
+/* Cada diapositiva entra deslizando (hacia adelante desde la derecha, hacia atrás desde la izquierda) */
+@keyframes entra_der { from { opacity: 0; transform: translateX(70px); } to { opacity: 1; transform: none; } }
+@keyframes entra_izq { from { opacity: 0; transform: translateX(-70px); } to { opacity: 1; transform: none; } }
+[class*="st-key-slidef_"] { animation: entra_der .55s cubic-bezier(.2,.7,.2,1) both; }
+[class*="st-key-slideb_"] { animation: entra_izq .55s cubic-bezier(.2,.7,.2,1) both; }
+
+/* Barra de navegación flotante tipo píldora (es un radio horizontal estilizado) */
+.st-key-nav { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 999999; width: max-content; max-width: 94vw;
+              padding: 7px 10px; background: rgba(10,10,10,.88); backdrop-filter: blur(14px); border: 1px solid #2f2f2f; border-radius: 999px;
+              box-shadow: 0 10px 40px rgba(0,0,0,.55); overflow-x: auto; }
+.st-key-nav [data-testid="stRadioGroup"], .st-key-nav [role="radiogroup"] { gap: 2px !important; flex-wrap: nowrap !important; }
+.st-key-nav label[data-testid="stRadioOption"] { padding: 8px 16px; border-radius: 999px; cursor: pointer; transition: background .25s ease, color .25s ease; margin: 0 !important; white-space: nowrap; }
+.st-key-nav label[data-testid="stRadioOption"] > div > div:first-child { display: none !important; }
+.st-key-nav label[data-testid="stRadioOption"] * { color: #9a9a9a !important; font-weight: 500; font-size: .9rem; }
+.st-key-nav label[data-testid="stRadioOption"]:hover { background: #1a1a1a; }
+.st-key-nav label[data-testid="stRadioOption"]:hover * { color: #fff !important; }
+.st-key-nav label[data-testid="stRadioOption"][data-selected="true"] { background: #232323; }
+.st-key-nav label[data-testid="stRadioOption"][data-selected="true"] * { color: #fff !important; }
+
+/* Portada */
+.hero { min-height: 62vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 3rem 1rem;
+        border-radius: 28px; margin-bottom: 1.2rem;
+        background: radial-gradient(900px 420px at 70% 10%, rgba(91,127,168,.30), transparent 60%), linear-gradient(180deg, #1c2128 0%, #0f1114 60%, #0a0a0a 100%); }
+.hero h1 { font-size: clamp(2.6rem, 8vw, 5rem); line-height: 1.05; margin: 0 0 1rem; }
+.hero .sub { font-size: 1.15rem; color: #d8d8d8; font-weight: 300; margin-bottom: .8rem; }
+.hero .txt { max-width: 620px; color: #bdbdbd; font-weight: 300; line-height: 1.6; }
+
+/* Encabezados de sección */
+.kicker { display: flex; align-items: center; gap: 14px; letter-spacing: .3em; font-size: .78rem; color: #a0a0a0; text-transform: uppercase; margin-top: .5rem; }
+.kicker::before { content: ""; width: 56px; height: 1px; background: #444; }
+.titulo { font-family: 'Outfit', sans-serif; font-style: italic; font-weight: 300; font-size: clamp(2rem, 5vw, 3rem); color: #fff; margin: .3rem 0 .4rem; line-height: 1.1; }
+.bajada { color: #b0b0b0; font-weight: 300; max-width: 640px; margin-bottom: 1.2rem; }
+
+/* Tarjetas del Top 3 */
+.top3 { display: grid; gap: 14px; margin: .6rem 0 1rem; }
+.tarj { display: grid; grid-template-columns: 56px 1fr; gap: 16px; background: #131313; border: 1px solid #272727; border-radius: 22px; padding: 20px 22px; transition: transform .3s ease, border-color .3s ease; }
+.tarj:hover { transform: translateY(-4px); border-color: #4a4a4a; }
+.tarj .num { font-family: 'Outfit', sans-serif; font-style: italic; font-weight: 300; font-size: 2.6rem; color: #5b7fa8; line-height: 1; }
+.tarj .nom { font-size: 1.1rem; font-weight: 500; color: #fff; margin-bottom: 4px; }
+.tarj .tipo { color: #b4b4b4; font-size: .85rem; margin-bottom: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.chip { background: #1d1d1d; border: 1px solid #2f2f2f; border-radius: 999px; padding: 5px 12px; font-size: .82rem; color: #f0f0f0; }
+.chip b { color: #9fc0e8; font-weight: 500; }
+.tarj .why { color: #cfcfcf; font-size: .9rem; line-height: 1.5; font-weight: 300; }
+
+/* Controles */
+[data-testid="stSelectbox"] [role="group"], [data-testid="stNumberInput"] [role="group"], [data-testid="stSelectbox"] input, [data-testid="stNumberInput"] input {
+    background-color: #0b0b0b !important; color: #f0f0f0 !important; }
+[data-testid="stSelectbox"] [role="group"], [data-testid="stNumberInput"] [role="group"] { border: 1px solid #2c2c2c !important; border-radius: 14px !important; }
+[data-testid="stNumberInput"] button { background-color: #141414 !important; color: #ccc !important; }
+[role="listbox"], [role="listbox"] * { background-color: #121212 !important; color: #f0f0f0 !important; }
+[role="option"]:hover, [role="option"]:hover * { background-color: #1d1d1d !important; }
+[data-testid="stRadioOption"] { transition: color .2s ease; }
+.stButton > button { border-radius: 999px; padding: .8rem 2rem; font-weight: 500; border: 1px solid #3a3a3a; background: #0b0b0b;
+                     transition: transform .25s ease, box-shadow .25s ease, background .25s ease; }
+.stButton > button, .stButton > button * { color: #ffffff !important; }
+.stButton > button[kind="primary"] { background: #f5f5f5; border: none; }
+.stButton > button[kind="primary"], .stButton > button[kind="primary"] * { color: #0a0a0a !important; }
+.stButton > button:hover { transform: translateY(-3px); box-shadow: 0 12px 34px rgba(255,255,255,.14); }
+
+/* Tarjetas, métricas, tablas, avisos, desplegables */
+[data-testid="stMetric"] { background: #141414; border: 1px solid #262626; border-radius: 22px; padding: 18px 22px; transition: transform .3s ease, border-color .3s ease; }
+[data-testid="stMetric"]:hover { transform: translateY(-4px); border-color: #444; }
+[data-testid="stMetricLabel"], [data-testid="stMetricLabel"] * { color: #c4c4c4 !important; }
+[data-testid="stMetricValue"], [data-testid="stMetricValue"] * { font-family: 'Outfit', sans-serif; font-weight: 300; color: #fff !important; }
+[data-testid="stMetricDelta"], [data-testid="stMetricDelta"] * { background: transparent !important; color: #9fc0e8 !important; }
+[data-testid="stTable"], [data-testid="stDataFrame"] { background: #101010; border: 1px solid #262626; border-radius: 20px; overflow: auto; }
+[data-testid="stTable"] table { color: #f0f0f0; }
+[data-testid="stTable"] th { background: #171717 !important; color: #c4c4c4 !important; text-transform: uppercase; font-size: .72rem; letter-spacing: .08em; }
+[data-testid="stTable"] td { background: #101010 !important; color: #f0f0f0 !important; border-color: #222 !important; }
+[data-testid="stExpander"] { background: #111; border: 1px solid #262626 !important; border-radius: 18px; transition: border-color .3s ease; }
+[data-testid="stExpander"]:hover { border-color: #444 !important; }
+[data-testid="stExpander"] summary, [data-testid="stExpander"] summary * { color: #fff !important; }
+[data-testid="stAlert"], [data-testid="stAlertContainer"], [data-testid="stAlertContainer"] > div { background-color: #161616 !important; }
+[data-testid="stAlertContainer"] { border: 1px solid #333 !important; border-left: 4px solid #5b9bd5 !important; border-radius: 16px !important; }
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentSuccess"]) { border-left-color: #4caf7a !important; }
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentWarning"]) { border-left-color: #e0a43a !important; }
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentError"]) { border-left-color: #e05d5d !important; }
+[data-testid="stAlert"] *:not([data-testid="stIconMaterial"]) { color: #f5f5f5 !important; }
+[data-testid="stCheckbox"] label, [data-testid="stCheckbox"] label * { color: #f0f0f0 !important; background-color: transparent !important; }
+[data-testid="stCheckbox"] label > div:first-of-type { background-color: #1d1d1d !important; border: 1px solid #777 !important; border-radius: 6px; }
+</style>
+"""
+
+
+def tarjetas_top3(df):
+    import html as _h
+    _e = lambda v: _h.escape(str(v)).replace("$", "&#36;")
+    out = ['<div class="top3">']
+    for _, r in df.iterrows():
+        out.append(
+            f'<div class="tarj"><div class="num">{int(r["Puesto"])}</div><div>'
+            f'<div class="nom">{_e(r["Instrumento"])}</div><div class="tipo">{_e(r["Tipo"])}</div>'
+            f'<div class="chips"><span class="chip"><b>Rendimiento</b> {_e(r["Rendimiento"])}</span>'
+            f'<span class="chip"><b>Riesgo</b> {_e(r["Riesgo"])}</span>'
+            f'<span class="chip"><b>Plazo de cobro</b> {_e(r["¿Cuándo tengo la plata?"])}</span></div>'
+            f'<div class="why"><b>Por qué está en el top 3:</b> {_e(r["Por qué está en el top 3"])}</div></div></div>')
+    out.append("</div>")
+    st.markdown("".join(out), unsafe_allow_html=True)
+
+
+def seccion(kicker, titulo, bajada=""):
+    st.markdown(f'<div class="kicker">{kicker}</div><div class="titulo">{titulo}</div>'
+                + (f'<div class="bajada">{bajada}</div>' if bajada else ""), unsafe_allow_html=True)
+
+
+st.markdown(ESTILO, unsafe_allow_html=True)
+
+# Parámetros del modelo (regresión logística estandarizada) entrenados con asalariados de la EPH 1T-2026.
+# Se incluyen en el código para que la app no dependa de archivos .pkl ni de versiones de scikit-learn.
+VARS_MODELO = ["edad", "ingresos", "universitario", "secundario", "en_pareja"]
+MEDIAS = [40.07629979743417, 1034429.3354715282, 0.4034436191762323, 0.4819941480981319, 0.5275714607247355]
+ESCALAS = [11.774440003673455, 812031.9410510369, 0.4905882849418803, 0.49967568411649566, 0.4992392357913232]
+COEFS = [-0.4567826539137116, -2.031904715007245, -0.5982311453044415, -0.2698069151545661, -0.12853803048411974]
+INTERCEPTO = -1.092551368370014
+
+
+class ModeloLogit:
+    def predict_proba(self, X):
+        z = INTERCEPTO + sum(c * (float(X[v].iloc[0]) - m) / e for v, c, m, e in zip(VARS_MODELO, COEFS, MEDIAS, ESCALAS))
+        p = 1 / (1 + np.exp(-z))
+        return np.array([[1 - p, p]])
+
+
+REFERENCIA_CSV = """situacion,region,educ,n,p10,p20,p30,p40,p50,p60,p70,p80,p90
+Asalariado/a,Cuyo,Primario o menos,138,164816.0,263358.0,360000.0,440000.0,600000.0,600000.0,800000.0,900000.0,1165767.0
+Asalariado/a,Cuyo,Secundario,534,280000.0,400000.0,491086.0,600000.0,700000.0,800000.0,950000.0,1100000.0,1400000.0
+Asalariado/a,Cuyo,Superior,411,440000.0,700000.0,800000.0,900000.0,1000000.0,1000000.0,1300000.0,1500000.0,2000000.0
+Asalariado/a,Gran Buenos Aires,Primario o menos,201,248742.0,400000.0,600000.0,600000.0,800000.0,900000.0,1007121.0,1200000.0,1500000.0
+Asalariado/a,Gran Buenos Aires,Secundario,679,300000.0,500000.0,600000.0,800000.0,900000.0,1000000.0,1200000.0,1400000.0,1800000.0
+Asalariado/a,Gran Buenos Aires,Superior,686,520286.0,720857.0,900000.0,1000000.0,1200000.0,1500000.0,1800000.0,2001300.0,3000000.0
+Asalariado/a,Noreste,Primario o menos,89,170000.0,200000.0,257675.0,400000.0,500000.0,700000.0,800000.0,1000000.0,1200000.0
+Asalariado/a,Noreste,Secundario,487,200000.0,300000.0,400000.0,500000.0,600000.0,755186.0,880000.0,1000000.0,1200000.0
+Asalariado/a,Noreste,Superior,355,366732.0,500000.0,620000.0,769376.0,850000.0,938312.0,1000000.0,1200000.0,1500000.0
+Asalariado/a,Noroeste,Primario o menos,339,200000.0,300000.0,400000.0,469570.0,518371.0,600000.0,700000.0,843032.0,1076223.0
+Asalariado/a,Noroeste,Secundario,1316,250000.0,350000.0,432863.0,550000.0,700000.0,800000.0,900000.0,1089713.0,1362591.0
+Asalariado/a,Noroeste,Superior,1232,360000.0,550000.0,700000.0,800000.0,900000.0,1000000.0,1200000.0,1500000.0,1900000.0
+Asalariado/a,Pampeana,Primario o menos,391,200000.0,300000.0,450000.0,649132.0,800000.0,850000.0,1000000.0,1200000.0,1500000.0
+Asalariado/a,Pampeana,Secundario,1558,240000.0,400000.0,600000.0,750000.0,800000.0,1000000.0,1100000.0,1200000.0,1500000.0
+Asalariado/a,Pampeana,Superior,1316,500000.0,700000.0,900000.0,1000000.0,1100000.0,1300000.0,1500000.0,1800000.0,2500000.0
+Asalariado/a,Patagonia,Primario o menos,132,400000.0,600000.0,700000.0,806411.0,1000000.0,1200000.0,1300000.0,1500000.0,2000000.0
+Asalariado/a,Patagonia,Secundario,735,500000.0,800000.0,1000000.0,1000000.0,1200000.0,1400000.0,1500000.0,1800000.0,2200000.0
+Asalariado/a,Patagonia,Superior,509,600000.0,1000000.0,1200000.0,1400000.0,1680570.0,2000000.0,2000000.0,2700000.0,3500000.0
+Cuenta propia,Cuyo,Primario o menos,49,80000.0,100000.0,200000.0,280000.0,300000.0,400000.0,450000.0,558153.0,800000.0
+Cuenta propia,Cuyo,Secundario,194,150000.0,200000.0,300000.0,400000.0,450000.0,500000.0,600000.0,800000.0,1000000.0
+Cuenta propia,Cuyo,Superior,95,150000.0,250000.0,400000.0,600000.0,800000.0,1000000.0,1200000.0,1500000.0,3000000.0
+Cuenta propia,Gran Buenos Aires,Primario o menos,52,100000.0,200000.0,301174.0,400000.0,438548.0,644310.0,791544.0,931216.0,1068911.0
+Cuenta propia,Gran Buenos Aires,Secundario,208,100000.0,200000.0,300000.0,500000.0,600000.0,800000.0,1000000.0,1200000.0,1935941.0
+Cuenta propia,Gran Buenos Aires,Superior,132,200000.0,300000.0,500000.0,700000.0,1000000.0,1000000.0,1500000.0,2000000.0,3000000.0
+Cuenta propia,Noreste,Primario o menos,59,138052.0,150000.0,227833.0,300000.0,300000.0,376383.0,500000.0,783214.0,824873.0
+Cuenta propia,Noreste,Secundario,212,100000.0,150000.0,200000.0,300000.0,360000.0,400000.0,500000.0,700000.0,950946.0
+Cuenta propia,Noreste,Superior,93,200000.0,300000.0,300000.0,400000.0,500000.0,700000.0,800000.0,1000000.0,1599800.0
+Cuenta propia,Noroeste,Primario o menos,153,150000.0,244674.0,300000.0,300000.0,400000.0,400000.0,500000.0,702627.0,900000.0
+Cuenta propia,Noroeste,Secundario,492,150000.0,200000.0,300000.0,350000.0,400000.0,500000.0,600000.0,800000.0,1000000.0
+Cuenta propia,Noroeste,Superior,292,200000.0,250000.0,350000.0,400000.0,582505.0,700000.0,900000.0,1200000.0,1600000.0
+Cuenta propia,Pampeana,Primario o menos,187,100000.0,200000.0,250000.0,317606.0,400000.0,600000.0,800000.0,1000000.0,1075441.0
+Cuenta propia,Pampeana,Secundario,519,150000.0,250000.0,400000.0,500000.0,600000.0,800000.0,1000000.0,1200000.0,1500000.0
+Cuenta propia,Pampeana,Superior,343,300000.0,400000.0,544582.0,769326.0,900000.0,1000000.0,1500000.0,1800000.0,2500000.0
+Cuenta propia,Patagonia,Primario o menos,46,255167.0,500000.0,600000.0,600000.0,824697.0,966029.0,1000000.0,1000000.0,1244872.0
+Cuenta propia,Patagonia,Secundario,155,200000.0,300000.0,400000.0,500000.0,700000.0,800000.0,1000000.0,1091756.0,1800000.0
+Cuenta propia,Patagonia,Superior,67,200000.0,477558.0,500000.0,700000.0,900000.0,1280831.0,2000000.0,2370578.0,3000000.0
+"""
+
+
+modelo = ModeloLogit()
+ref = pd.read_csv(io.StringIO(REFERENCIA_CSV))
+
+
+# ───────────────────────── Datos de apoyo ─────────────────────────
+# Provincia -> región EPH (la tabla de referencia de ingresos está armada por región EPH)
+PROVINCIAS = {
+    "Ciudad Autónoma de Buenos Aires": "Gran Buenos Aires",
+    "Buenos Aires – Gran Buenos Aires (conurbano)": "Gran Buenos Aires",
+    "Buenos Aires – interior de la provincia": "Pampeana",
+    "Catamarca": "Noroeste", "Chaco": "Noreste", "Chubut": "Patagonia", "Córdoba": "Pampeana",
+    "Corrientes": "Noreste", "Entre Ríos": "Pampeana", "Formosa": "Noreste", "Jujuy": "Noroeste",
+    "La Pampa": "Pampeana", "La Rioja": "Noroeste", "Mendoza": "Cuyo", "Misiones": "Noreste",
+    "Neuquén": "Patagonia", "Río Negro": "Patagonia", "Salta": "Noroeste", "San Juan": "Cuyo",
+    "San Luis": "Cuyo", "Santa Cruz": "Patagonia", "Santa Fe": "Pampeana",
+    "Santiago del Estero": "Noroeste", "Tierra del Fuego": "Patagonia", "Tucumán": "Noroeste",
+}
+
+# Nivel educativo (categorías de NIVEL_ED de la EPH) -> (universitario, secundario, grupo de la tabla de referencia)
+EDUCACION = {
+    "Primario incompleto o sin instrucción": (0, 0, "Primario o menos"),
+    "Primario completo": (0, 0, "Primario o menos"),
+    "Secundario incompleto": (0, 1, "Secundario"),
+    "Secundario completo": (0, 1, "Secundario"),
+    "Universitario / terciario incompleto": (1, 0, "Superior"),
+    "Universitario / terciario completo": (1, 0, "Superior"),
+}
+
+TRAMOS_USD = {"Menos de USD 500": (300, 500), "Entre USD 500 y 1.000": (500, 1000), "Entre USD 1.000 y 2.000": (1000, 2000),
+              "Entre USD 2.000 y 3.000": (2000, 3000), "Entre USD 3.000 y 5.000": (3000, 5000), "Más de USD 5.000": (5000, 7000)}
+TC_REF = 1500        # referencia editable; el usuario puede cambiarla en la app
+FECHA_REF = "23/10/2026"
+TNA_MM_REF = 21.0   # mayor TNA de los money market del ranking de referencia (CAFCI al 23/10/2026)
+
+FUENTES = {
+    "emergencia": [("CAFCI (Cámara Argentina de FCI) – valores cuotaparte oficiales", "https://www.cafci.org.ar"),
+                   ("CNV – regulador de fondos y ALyCs", "https://www.cnv.gob.ar"),
+                   ("Balanz – fondos comunes (para contrastar el dato)", "https://balanz.com"),
+                   ("Rankia – ranking de FCI con datos de CAFCI (referencia con fecha)",
+                    "https://www.rankia.com.ar/blog/fondos-comunes-de-inversion/4142161-ranking-fondos-comunes-inversion-argentina-2020"),
+                   ("ArgentinaDatos – API que republica los datos de CAFCI", "https://argentinadatos.com")],
+    "cedears": [("Yahoo Finance – precios históricos", "https://finance.yahoo.com"),
+                ("BYMA – mercado donde cotizan CEDEARs y acciones", "https://www.byma.com.ar"),
+                ("CNV – regulador del mercado de capitales (plazo de liquidación T+1)", "https://www.cnv.gob.ar"),
+                ("Boletín Oficial – CNV: plazo de liquidación T+1", "https://www.boletinoficial.gob.ar/pdf/aviso/primera/316812/20250505")],
+}
+FUENTES["renta"] = FUENTES["emergencia"]
+FUENTES["acciones"] = FUENTES["cedears"]
+FUENTES["deudas"] = FUENTES["emergencia"] + [("BCRA – Central de Deudores y información al usuario financiero", "https://www.bcra.gob.ar")]
+
+EXPLICACIONES = {
+    "emergencia": ("Fondo común de inversión Money Market",
+                   "Un fondo común de inversión (FCI) de **mercado de dinero** junta la plata de muchos ahorristas y la coloca en "
+                   "plazos fijos, cauciones y cuentas remuneradas de muy corto plazo. Podés retirar tu dinero **el mismo día (T+0)**. "
+                   "Es lo más parecido a una caja de ahorro que rinde, pero su rendimiento **no está garantizado**."),
+    "renta": ("Fondo común de inversión de Renta Fija",
+              "Un **Fondo Común de Inversión de Renta Fija** es un producto de inversión colectiva en el que el dinero de varios ahorristas "
+              "se agrupa para comprar activos de deuda (bonos, letras y obligaciones negociables). Es como prestarle plata a gobiernos y "
+              "empresas entre muchos, con un administrador profesional. Suele rescatarse en **24 horas hábiles (T+1)**. Puede perder valor "
+              "si suben las tasas o si un emisor no paga."),
+    "cedears": ("CEDEAR",
+                "Un **CEDEAR** es un certificado que representa acciones de empresas del exterior (por ejemplo Apple o Coca-Cola). "
+                "Se compra y se vende en pesos en la bolsa argentina (BYMA), pero su precio sigue al de la acción en dólares. "
+                "Se liquida en **24 horas (T+1)**. Tiene riesgo de mercado: puede subir o bajar."),
+    "acciones": ("Acciones argentinas",
+                 "Una **acción** es una parte del capital de una empresa: al comprarla sos socio/a. No tiene un rendimiento fijo, su precio "
+                 "sube y baja todos los días y puede caer con fuerza. Se liquida en **24 horas (T+1)**. Solo conviene para plazos largos y "
+                 "personas que toleran perder valor en el camino."),
+}
+
+GLOSARIO = (
+    "- **TNA (Tasa Nominal Anual):** lo que rendiría la inversión en un año si la tasa se mantuviera igual, sin sumar intereses sobre intereses. "
+    "Sirve para comparar fondos de pesos entre sí.\n"
+    "- **Plazo T+0 / T+1:** días hábiles que tarda en acreditarse tu dinero. T+0 = el mismo día; T+1 = 24 horas hábiles.\n"
+    "- **Obligación Negociable (ON):** bono que emite una empresa privada para pedir plata prestada; paga intereses.\n"
+    "- **Bono CER:** bono del Estado cuyo capital se ajusta por inflación.\n"
+    "- **Riesgo de crédito:** que quien emitió la deuda no pueda pagar.\n"
+    "- **Volatilidad:** cuánto sube y baja el precio. Más volatilidad = más riesgo."
+)
+
+
+def fmt(x, dec=1):
+    return f"{x:.{dec}f}".replace(".", ",")
+
+
+def peso_t(x):
+    # formato argentino para tablas: $1.000.000
+    return "$" + f"{x:,.0f}".replace(",", ".")
+
+
+def peso(x):
+    # igual, pero con el $ escapado para texto markdown (dos $ en una frase se interpretan como fórmula)
+    return "\\$" + f"{x:,.0f}".replace(",", ".")
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def ranking(clave, meses="1 mes"):
+    # Top 3 con datos reales, medido en la ventana del horizonte elegido. Se cachea 6 horas para no consultar las APIs en cada clic.
+    if clave == "emergencia":
+        return top_fci("mercadoDinero", dias=HORIZONTES[meses])
+    if clave == "renta":
+        return top_fci("rentaFija", dias=HORIZONTES[meses])
+    periodo = "2y" if MESES_NUM[meses] >= 24 else ("1y" if meses == "1 año" else "6mo")      # en renta variable una ventana menor a 6 meses es puro ruido
+    if clave == "cedears":
+        return top_mercado(CEDEARS, periodo=periodo)
+    return top_mercado(ACCIONES, periodo=periodo)
+
+
+def tabla_referencia(clave):
+    # Referencia con fuente y fecha (Rankia con datos de CAFCI, al cierre del 23/10/2026). Se usa solo si falla la consulta en vivo.
+    if clave == "emergencia":
+        datos = [("ADCAP AHORRO PESOS F. DINERO - Cl. C", 21.0), ("PELLEGRINI RENTA PESOS - Cl. B", 20.9),
+                 ("LOMBARD RENTA EN PESOS (Patagonia)", 20.8)]
+        return pd.DataFrame({
+            "Puesto": [1, 2, 3], "Instrumento": [d[0] for d in datos], "TNA (%)": [d[1] for d in datos],
+            "Plazo de rescate": ["T+0 (mismo día)"] * 3,
+            "Por qué está en el top 3": [f"Mayor TNA ({fmt(d[1])}%) entre los money market del ranking de CAFCI al {FECHA_REF}; se rescata el mismo día." for d in datos]})
+    if clave == "renta":
+        datos = [("BALANZ CAPITAL AHORRO - Cl. A", 2.25, 37.62), ("1822 RAÍCES VALORES FIDUCIARIOS", 2.18, 36.94),
+                 ("ALLARIA AHORRO PLUS - Cl. B", 2.14, 34.98)]
+        tna = [round(d[1] * 365 / 30, 1) for d in datos]
+        return pd.DataFrame({
+            "Puesto": [1, 2, 3], "Instrumento": [d[0] for d in datos], "TNA (%)": tna,
+            "Plazo de rescate": ["T+1 (24 h hábiles)"] * 3,
+            "Por qué está en el top 3": [f"Rindió {fmt(d[1], 2)}% en 30 días (TNA estimada {fmt(t)}%) y {fmt(d[2], 2)}% en 12 meses, "
+                                         f"los mayores del grupo T+1 en pesos del ranking de CAFCI al {FECHA_REF}." for d, t in zip(datos, tna)]})
+    return None
+
+
+def mostrar_fuentes(clave):
+    with st.expander("Fuentes de los fondos (CAFCI)" if clave in ("emergencia", "renta", "deudas") else "Fuentes de CEDEARs y acciones"):
+        st.write("El ranking se calcula con estas fuentes públicas. Podés abrirlas y comprobar el dato vos mismo:")
+        for nombre, url in FUENTES[clave]:
+            st.markdown(f"- [{nombre}]({url})")
+        if clave in ("emergencia", "renta", "deudas"):
+            st.caption(f"Referencia de contraste con fecha: al {FECHA_REF}, los money market con mayor rendimiento rendían entre 19,0% y 21,0% de TNA "
+                       "(cuotapartes CAFCI, según el ranking de Rankia). Plazos: money market T+0 (mismo día); renta fija en pesos T+1 (24 horas hábiles).")
+        else:
+            st.caption("Plazo de liquidación de acciones y CEDEARs en BYMA: T+1 (24 horas), según la normativa de la CNV.")
+
+
+def mostrar_explicacion(clave):
+    if clave in EXPLICACIONES:
+        titulo, texto = EXPLICACIONES[clave]
+        with st.expander(titulo):
+            st.markdown(texto)
+            st.markdown("**Palabras que aparecen en la tabla:**\n\n" + GLOSARIO)
+
+
+def mostrar_top3(clave, categoria_fallback):
+    # Muestra el top 3 real (ordenado por TNA o retorno/riesgo, con su plazo). Si no hay conexión, usa la referencia con fuente y fecha.
+    try:
+        with st.spinner("Consultando datos reales de mercado..."):
+            df_top, meta = ranking(clave)
+        st.write("**Top 3 según el sistema (ordenado de mejor a peor):**")
+        st.table(df_top.set_index("Puesto"))
+        st.caption(f"Fuente: {meta['fuente']} · datos al {meta['fecha']} · Criterio: {meta['criterio']}. "
+                   "Rendimientos pasados no garantizan resultados futuros.")
+        if clave in ("cedears", "acciones"):
+            st.caption("En renta variable no existe una TNA fija: se muestra el retorno anualizado de los últimos 12 meses y la relación retorno/riesgo.")
+    except Exception as e:
+        st.warning("No se pudo consultar el mercado en vivo en este momento. Se muestra una referencia con fuente y fecha.")
+        st.caption(f"Detalle técnico: {type(e).__name__}: {str(e)[:180]}")
+        tabla = tabla_referencia(clave)
+        if tabla is not None:
+            st.write(f"**Top 3 de referencia (datos de CAFCI al {FECHA_REF}, ordenado por TNA):**")
+            st.table(tabla.set_index("Puesto"))
+            st.caption("Fuente: ranking de Rankia con valores cuotaparte de CAFCI. Para renta fija la TNA se estima con el rendimiento de 30 días.")
+        else:
+            lista = db_activos[db_activos["Categoria"] == categoria_fallback][["Instrumento", "Riesgo principal", "Plazo de liquidación", "Se opera en"]]
+            st.table(lista.reset_index(drop=True))
+            st.caption("Lista ilustrativa sin ranking (no hay datos en vivo). El plazo de liquidación en BYMA es T+1 (24 horas).")
+    mostrar_explicacion(clave)
+    mostrar_fuentes(clave)
+
+
+def mostrar_deudas(tipo_deuda, monto_deuda, cft, atraso, alto):
+    st.error("**Plan para ordenar tus deudas**")
+    # Tasa de referencia: la mayor TNA de money market (en vivo si se puede; si no, la de referencia con fecha)
+    try:
+        df_mm, meta_mm = ranking("emergencia")
+        tna_ref, origen = float(df_mm["TNA (%)"].iloc[0]), f"datos en vivo de CAFCI al {meta_mm['fecha']}"
+    except Exception:
+        tna_ref, origen = TNA_MM_REF, f"referencia de CAFCI al {FECHA_REF}"
+
+    if cft > 0:
+        if cft > tna_ref:
+            st.success(f"Tu deuda cuesta aproximadamente **{fmt(cft)}%** anual y el mejor money market rinde cerca de **{fmt(tna_ref)}%** de TNA ({origen}). "
+                       "Cancelar la deuda 'rinde' más que invertir: **priorizá pagarla antes de invertir**.")
+        else:
+            st.info(f"Tu deuda cuesta aproximadamente **{fmt(cft)}%** anual y el mejor money market rinde cerca de **{fmt(tna_ref)}%** de TNA ({origen}). "
+                    "Podés seguir pagándola normalmente e ir armando un colchón. Tené en cuenta que la TNA y el costo financiero no son exactamente comparables.")
+    else:
+        st.info("No indicaste el costo financiero (CFT). Pedilo a tu banco o tarjeta: es el número clave para decidir qué deuda pagar primero.")
+
+    prioridad = {
+        "Tarjeta de crédito (pago mínimo o financiación)": "Es de las deudas más caras: evitá pagar solo el mínimo y cancelala primero.",
+        "Préstamo personal": "Revisá su CFT: si podés refinanciarlo a una tasa menor, conviene.",
+        "Crédito hipotecario / UVA": "Suele ser la deuda más barata y de largo plazo: pagá la cuota y priorizá cancelar antes las deudas más caras.",
+        "Deuda informal / prestamista": "Suele tener tasas muy altas y condiciones poco claras: es la primera a cancelar o renegociar.",
+        "Otras": "Compará su costo con el de tus demás deudas y empezá por la más cara.",
+    }[tipo_deuda]
+    st.write(f"**Tu deuda principal ({tipo_deuda.lower()}):** {prioridad}")
+    if monto_deuda > 0:
+        st.write(f"Monto adeudado informado: **{peso(monto_deuda)}**.")
+
+    st.markdown(
+        "**Opciones para ordenarte:**\n\n"
+        "1. **Método avalancha:** pagá primero la deuda con mayor tasa de interés (ahorrás más en intereses).\n"
+        "2. **Método bola de nieve:** si necesitás motivación, cancelá primero la deuda más chica y seguí con la siguiente.\n"
+        "3. **Consolidar o refinanciar:** un solo préstamo a tasa fija solo conviene si su costo financiero total (CFT) es menor al de tus deudas actuales.\n"
+        "4. **Negociar con el acreedor:** pedí refinanciar, extender el plazo o bajar la tasa antes de atrasarte.\n"
+        "5. **No pagar solo el mínimo de la tarjeta:** el saldo restante se financia a tasas muy altas.\n"
+        "6. **Colchón mínimo:** dejá guardado alrededor de un mes de gastos en un fondo de liquidez inmediata para no volver a endeudarte ante un imprevisto.\n"
+        "7. **No invertir en activos de riesgo** mientras tu deuda cueste más de lo que rinde la inversión.\n"
+        "8. **Revisá tu situación crediticia** en la Central de Deudores del BCRA.")
+    if atraso == "Sí":
+        st.warning("Tenés cuotas atrasadas: los intereses punitorios se acumulan rápido. Contactá al acreedor cuanto antes para refinanciar.")
+    if alto:
+        st.warning("Tu diagnóstico de riesgo es alto: priorizá liquidez y orden de deudas antes de tomar nuevo crédito.")
+    st.write("**Dónde dejar tu colchón mínimo (fondos de liquidez inmediata):**")
+    mostrar_top3("emergencia", "Fondo de Emergencia")
+    st.markdown("Más información sobre tu situación crediticia: [BCRA – Central de Deudores](https://www.bcra.gob.ar)")
+
+
+FUENTES_TEST = [("Balanz – Test del Inversor", "https://balanz.com/test-del-inversor"),
+                ("IOL InvertirOnline – Test del Inversor", "https://www.invertironline.com/herramientas/test-del-inversor"),
+                ("Bull Market Brokers – test de perfil (mencionado por DolarHoy)", "https://dolarhoy.com/mercado/conocerse-a-uno-mismo-el-paso-indispensable-antes-de-empezar-a-invertir-en-el-mercado-202662212130"),
+                ("Rankia – cartera con CEDEARs según perfil (rangos de renta variable)", "https://www.rankia.com.ar/blog/cedear/6887815-como-armar-cartera-inversion-cedears-segun-perfil-riesgo"),
+                ("Rankia – cartera balanceada en Argentina", "https://www.rankia.com.ar/blog/trading-argentina/6956118-cartera-inversion-balanceada-que"),
+                ("iProfesional – en qué invertir según cada perfil (carteras de IOL)", "https://www.iprofesional.com/finanzas/458795-finanzas-personales-en-que-me-conviene-invertir-segun-mi-perfil-de-riesgo")]
+
+
+# ───────────────────────── Horizontes, liquidez, Top 3 mixto y cartera por perfil ─────────────────────────
+HORIZONTES = {"1 mes": 30, "3 meses": 90, "6 meses": 180, "1 año": 365, "2 años": 365, "3 años": 365, "5 años o más": 365}      # días de la ventana con que se mide el rendimiento
+MESES_NUM = {"1 mes": 1, "3 meses": 3, "6 meses": 6, "1 año": 12, "2 años": 24, "3 años": 36, "5 años o más": 60}
+
+TIPOS = {
+    "emergencia": {"nombre": "Fondo de dinero (Money Market)", "riesgo": "Bajo", "liquidez": "El mismo día (T+0)", "min": 1,
+                   "que_es": "Fondo que presta tu plata a muy corto plazo. Es como una caja de ahorro que rinde más.",
+                   "motivo": "te da liquidez inmediata con riesgo bajo"},
+    "renta": {"nombre": "Fondo de renta fija", "riesgo": "Bajo a medio", "liquidez": "24 h hábiles (T+1)", "min": 1,
+              "que_es": "Fondo que presta tu plata (junto a la de otros) al Estado y a empresas, con un administrador profesional.",
+              "motivo": "busca ganarle a la inflación con un riesgo moderado"},
+    "cedears": {"nombre": "CEDEAR", "riesgo": "Alto", "liquidez": "24 h (T+1)", "min": 6,
+                "que_es": "Papel que representa acciones de empresas del exterior (Apple, Coca-Cola…) y se compra en pesos.",
+                "motivo": "te expone a empresas del mundo y al dólar, con más potencial y más altibajos"},
+    "acciones": {"nombre": "Acción argentina", "riesgo": "Muy alto", "liquidez": "24 h (T+1)", "min": 12,
+                 "que_es": "Una parte de una empresa argentina: sos socio/a. Su precio sube y baja todos los días.",
+                 "motivo": "tiene el mayor potencial de crecimiento, pero también las caídas más fuertes"},
+}
+
+# Orden de preferencia de los tipos de instrumento según objetivo y perfil (de más a menos adecuado)
+ORDEN = {
+    ("renta", "Conservador"): ["renta", "emergencia", "cedears"],
+    ("renta", "Moderado"): ["renta", "cedears", "emergencia"],
+    ("renta", "Agresivo"): ["renta", "cedears", "acciones", "emergencia"],
+    ("crecimiento", "Conservador"): ["renta", "cedears", "emergencia"],
+    ("crecimiento", "Moderado"): ["cedears", "renta", "acciones", "emergencia"],
+    ("crecimiento", "Agresivo"): ["acciones", "cedears", "renta", "emergencia"],
+}
+ORDEN_EMERGENCIA = ["emergencia", "renta"]
+
+# Cartera base por perfil (% en liquidez, renta fija, CEDEARs, acciones). La renta variable (CEDEARs + acciones) respeta los rangos
+# publicados por Rankia: conservador 15-40 %, moderado 40-60 %, agresivo más de 70 %.
+BASE_CARTERA = {
+    "Conservador": {"emergencia": 30, "renta": 45, "cedears": 20, "acciones": 5},
+    "Moderado": {"emergencia": 15, "renta": 30, "cedears": 30, "acciones": 25},
+    "Agresivo": {"emergencia": 5, "renta": 15, "cedears": 35, "acciones": 45},
+}
+# Tope de renta variable y de renta fija según el plazo (a menos tiempo, menos riesgo)
+LIMITES = {"1 mes": (0, 20), "3 meses": (10, 70), "6 meses": (40, 100), "1 año": (100, 100), "2 años": (100, 100), "3 años": (100, 100), "5 años o más": (100, 100)}
+LIQ_MIN = {"Sí, es probable": 30, "Tal vez": 15, "No, no la voy a tocar": 0}
+NOMBRE_BUCKET = {"emergencia": "Liquidez (fondo de dinero)", "renta": "Renta fija (fondos / bonos)",
+                 "cedears": "CEDEARs (empresas del exterior)", "acciones": "Acciones argentinas"}
+
+
+def armar_cartera(perfil, meses, liq):
+    c = dict(BASE_CARTERA[perfil])
+    rv_max, rf_max = LIMITES[meses]
+    rv = c["cedears"] + c["acciones"]
+    if rv > rv_max:                                   # 1) tope de renta variable según el plazo
+        f = rv_max / rv
+        c["cedears"], c["acciones"] = c["cedears"] * f, c["acciones"] * f
+        c["renta"] += rv - rv_max
+    falta = LIQ_MIN[liq] - c["emergencia"]            # 2) colchón mínimo de liquidez si podés necesitar la plata
+    for k in ("acciones", "cedears", "renta"):
+        if falta > 0:
+            t = min(c[k], falta)
+            c[k] -= t
+            c["emergencia"] += t
+            falta -= t
+    if c["renta"] > rf_max:                           # 3) tope de renta fija (a 1 mes casi todo va a liquidez)
+        c["emergencia"] += c["renta"] - rf_max
+        c["renta"] = rf_max
+    r = {k: int(round(v)) for k, v in c.items()}
+    r[max(r, key=r.get)] += 100 - sum(r.values())     # ajuste de redondeo
+    return r
+
+
+def items_tipo(clave, meses):
+    """Devuelve (lista de instrumentos, origen). Usa datos en vivo; si no hay conexión, usa la referencia con fecha."""
+    t = TIPOS[clave]
+    try:
+        df, meta = ranking(clave, meses)
+        items = []
+        for _, r in df.iterrows():
+            rend = f"TNA {fmt(r['TNA (%)'])}%" if "TNA (%)" in df.columns else f"{fmt(r['Retorno anual (%)'])}% anual (histórico)"
+            items.append({"Instrumento": r["Instrumento"], "Rendimiento": rend, "porque": r["Por qué está en el top 3"]})
+        return items, f"en vivo · {meta['fuente']} · datos al {meta['fecha']}"
+    except Exception:
+        tabla = tabla_referencia(clave)
+        if tabla is not None:
+            items = [{"Instrumento": r["Instrumento"], "Rendimiento": f"TNA {fmt(r['TNA (%)'])}%", "porque": r["Por qué está en el top 3"]}
+                     for _, r in tabla.iterrows()]
+            return items, f"referencia con fecha · CAFCI al {FECHA_REF}"
+        nombres = list((CEDEARS if clave == "cedears" else ACCIONES).values())[:3]
+        return ([{"Instrumento": n, "Rendimiento": "sin dato en vivo", "porque": "Lista ilustrativa: no hay conexión para calcular el ranking."}
+                 for n in nombres], "lista ilustrativa (sin conexión)")
+
+
+def top3_mixto(obj_key, perfil_ef, meses):
+    """Top 3 que combina distintos tipos de instrumento según objetivo, perfil y plazo. Devuelve (DataFrame, tipos_excluidos, origenes)."""
+    orden = ORDEN_EMERGENCIA if obj_key == "emergencia" else ORDEN[(obj_key, perfil_ef)]
+    elegibles = [t for t in orden if TIPOS[t]["min"] <= MESES_NUM[meses]]
+    excluidos = [t for t in orden if t not in elegibles]
+    cargados, origenes = {}, {}
+    for t in elegibles[:3]:
+        cargados[t], origenes[t] = items_tipo(t, meses)
+    cola = []                                          # 1.º de cada tipo en orden de preferencia; si faltan, se completa con los siguientes del mejor tipo
+    for t in elegibles[:3]:
+        if cargados[t]:
+            cola.append((t, cargados[t][0]))
+    k = 1
+    while len(cola) < 3 and k < 3:
+        for t in elegibles[:3]:
+            if len(cola) < 3 and len(cargados[t]) > k:
+                cola.append((t, cargados[t][k]))
+        k += 1
+    filas = []
+    for i, (t, it) in enumerate(cola[:3]):
+        info = TIPOS[t]
+        filas.append({"Puesto": i + 1, "Tipo": info["nombre"], "Instrumento": it["Instrumento"], "Rendimiento": it["Rendimiento"],
+                      "Riesgo": info["riesgo"], "¿Cuándo tengo la plata?": info["liquidez"],
+                      "Por qué está en el top 3": f"Es del tipo que mejor encaja con tu objetivo y perfil: {info['motivo']}. {it['porque']}"})
+    return pd.DataFrame(filas), excluidos, origenes
+
+
+def perfil_efectivo(perfil, meses, alto):
+    tope = {"1 mes": "Conservador", "3 meses": "Moderado"}.get(meses)
+    orden = ["Conservador", "Moderado", "Agresivo"]
+    p = perfil
+    if tope and orden.index(p) > orden.index(tope):
+        p = tope
+    if alto:
+        p = "Conservador"
+    return p
+
+
+# Lista ILUSTRATIVA: solo se usa como respaldo para CEDEARs y acciones si no hay conexión a las fuentes (sin rendimientos inventados).
+db_activos = pd.DataFrame({
+    "Instrumento": ["SPY (CEDEAR S&P 500)", "KO (CEDEAR Coca-Cola)", "AAPL (CEDEAR Apple)",
+                    "YPFD (acción YPF)", "GGAL (acción Galicia)", "PAMP (acción Pampa Energía)"],
+    "Categoria": ["Crecimiento Conservador (CEDEAR)"] * 3 + ["Crecimiento Agresivo (Acciones)"] * 3,
+    "Riesgo principal": ["Riesgo de mercado externo y de tipo de cambio"] * 3 + ["Alta volatilidad local"] * 3,
+    "Plazo de liquidación": ["T+1 (24 h)"] * 6,
+    "Se opera en": ["ALyC"] * 6,
+})
+
+
+# ───────────────────────── Interfaz (diapositivas) ─────────────────────────
+PASOS = ["Inicio", "Sobre vos", "Test", "Objetivo", "Resultado", "Inversiones", "Cartera", "Más info"]
+OPC_OBJ = ["Que no se pierda, aunque gane poco", "Que gane algo más que la inflación, aceptando algunos altibajos",
+           "Que crezca lo más posible, aunque pueda perder una parte"]
+OPC_TOL = ["Vendo todo para no perder más", "Espero a que se recupere", "Compro más porque está más barata"]
+OPC_PERD = ["Ninguna: no quiero perder nada", "Hasta un 10%", "Más del 20%, si puedo ganar bastante más"]
+OPC_EXP = ["Ninguna", "Plazo fijo, billeteras virtuales o fondos", "Bonos, acciones o CEDEARs"]
+OBJETIVOS = ["Fondo para Presupuesto Mensual o Emergencia", "Generar renta y ganarle a la inflación",
+             "Crecimiento agresivo del capital a largo plazo", "Priorizar, consolidar y ordenar deudas pendientes"]
+TIPOS_DEUDA = ["Tarjeta de crédito (pago mínimo o financiación)", "Préstamo personal", "Crédito hipotecario / UVA",
+               "Deuda informal / prestamista", "Otras"]
+VENTANA = {"1 mes": "el último mes", "3 meses": "los últimos 3 meses", "6 meses": "los últimos 6 meses", "1 año": "el último año",
+           "2 años": "el último año (el máximo que mide la app)", "3 años": "el último año (el máximo que mide la app)",
+           "5 años o más": "el último año (el máximo que mide la app)"}
+
+DEF = {"edad": 30, "tramo": "Entre USD 1.000 y 2.000", "tc": TC_REF, "situacion": "Asalariado/a (en relación de dependencia)",
+       "provincia": "Ciudad Autónoma de Buenos Aires", "edu": list(EDUCACION.keys())[3], "pareja": "Vivo solo/a",
+       "q_obj": OPC_OBJ[1], "horizonte": "6 meses", "liquidez": "Tal vez", "tolerancia": OPC_TOL[1], "perdida": OPC_PERD[1],
+       "experiencia": OPC_EXP[0], "flujo": "Fijos todos los meses", "compromisos": "No", "retencion": 10,
+       "objetivo": OBJETIVOS[1], "monto": 500000, "tipo_deuda": TIPOS_DEUDA[0], "monto_deuda": 0, "cft": 0.0, "atraso": "No",
+       "paso": "Inicio", "_ult": 0}
+S = st.session_state
+for _k, _v in DEF.items():            # los widgets que no se dibujan en una diapositiva no pierden su valor
+    S[_k] = S.get(_k, _v)
+
+
+@st.cache_data(ttl=3 * 3600, show_spinner=False)
+def dolar_oficial():
+    # Dólar oficial (venta) en vivo. Si ninguna fuente responde devuelve None y la app pide el valor a mano.
+    for url in ("https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial", "https://dolarapi.com/v1/dolares/oficial"):
+        try:
+            r = requests.get(url, timeout=12, headers={"User-Agent": "asesor-financiero-tp/1.0"})
+            r.raise_for_status()
+            d = r.json()
+            d = d[-1] if isinstance(d, list) else d
+            fecha = str(d.get("fecha") or d.get("fechaActualizacion") or "")[:10]
+            return float(d["venta"]), fecha, url.split("/")[2]
+        except Exception:
+            continue
+    return None
+
+
+def ir(p):
+    S["paso"] = p
+
+
+def botones(anterior=None, siguiente=None, texto_sig="Siguiente"):
+    c1, c2, _ = st.columns([1, 1, 2])
+    if anterior:
+        c1.button("Atrás", key=f"atras_{S['paso']}", on_click=ir, args=(anterior,))
+    if siguiente:
+        c2.button(texto_sig, key=f"sig_{S['paso']}", on_click=ir, args=(siguiente,), type="primary")
+
+
+DOLAR = dolar_oficial()
+if DOLAR:
+    S["tc"] = DOLAR[0]
+
+
+# ---- Navegación flotante ----
+with st.container(key="nav"):
+    st.radio("Navegación", PASOS, key="paso", horizontal=True, label_visibility="collapsed")
+
+paso = S["paso"]
+idx = PASOS.index(paso)
+sentido = "f" if idx >= S["_ult"] else "b"
+S["_ult"] = idx
+
+# ---- Cálculos (se hacen siempre con los valores guardados) ----
+univ, sec, edu_ref = EDUCACION[S["edu"]]
+lo_usd, hi_usd = TRAMOS_USD[S["tramo"]]
+tc = S["tc"]
+ingresos = (lo_usd + hi_usd) / 2 * tc
+region = PROVINCIAS[S["provincia"]]
+es_asalariado = S["situacion"].startswith("Asalariado")
+horizonte = S["horizonte"]
+liquidez = S["liquidez"]
+objetivo = S["objetivo"]
+monto = S["monto"]
+
+proba_alto_riesgo = None
+if es_asalariado:
+    datos_usuario = pd.DataFrame([[float(S["edad"]), float(ingresos), univ, sec, 1 if S["pareja"] == "Vivo en pareja / Casado/a" else 0]], columns=VARS_MODELO)
+    proba_alto_riesgo = modelo.predict_proba(datos_usuario)[0][1]
+alto = (proba_alto_riesgo is not None and proba_alto_riesgo > 0.5)
+
+puntos = [
+    OPC_OBJ.index(S["q_obj"]),
+    {"1 mes": 0, "3 meses": 0, "6 meses": 1}.get(horizonte, 2),
+    {"Sí, es probable": 0, "Tal vez": 1, "No, no la voy a tocar": 2}[liquidez],
+    OPC_TOL.index(S["tolerancia"]),
+    OPC_PERD.index(S["perdida"]),
+    OPC_EXP.index(S["experiencia"]),
+    (1 if S["flujo"].startswith("Fijos") else 0) + (1 if S["compromisos"] == "No" else 0),
+    2 if S["retencion"] >= 40 else (1 if S["retencion"] >= 20 else 0),
+]
+total = sum(puntos)
+perfil = "Conservador" if total <= 5 else ("Moderado" if total <= 10 else "Agresivo")
+perfil_ef = perfil_efectivo(perfil, horizonte, alto)
+
+with st.container(key=f"slide{sentido}_{idx}"):
+
+    # ================= 0. Inicio =================
+    if paso == "Inicio":
+        st.markdown(
+            '<div class="hero"><h1>Asesor<br>Financiero</h1>'
+            '<div class="sub">Riesgo crediticio, perfil de inversor y cartera ideal</div>'
+            '<div class="txt">Contanos tu situación y tu objetivo. Estimamos tu riesgo con datos de la EPH, descubrimos tu perfil, '
+            'te mostramos un Top 3 de inversiones reales y te sugerimos cómo repartir tu plata. Todo explicado en simple.</div></div>',
+            unsafe_allow_html=True)
+        botones(siguiente="Sobre vos", texto_sig="Empezar")
+
+    # ================= 1. Sobre vos =================
+    elif paso == "Sobre vos":
+        seccion("Paso 1", "Sobre vos", "Estos datos alimentan el modelo de riesgo crediticio entrenado con la EPH.")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.number_input("Edad:", min_value=18, max_value=100, key="edad")
+            st.selectbox("Ingreso mensual propio (en dólares):", list(TRAMOS_USD.keys()), key="tramo")
+            if DOLAR:
+                st.caption(f"Dólar oficial (venta): **{peso(DOLAR[0])}** al {DOLAR[1]} (fuente: {DOLAR[2]}). Se usa para pasar tu ingreso a pesos.")
+            else:
+                st.number_input("No pudimos consultar el dólar oficial. Ingresá la cotización ($ por USD):", min_value=100, step=10, key="tc")
+            st.caption(f"Se usa el punto medio del tramo: {peso(ingresos)} por mes.")
+            st.radio("Situación laboral:", ["Asalariado/a (en relación de dependencia)", "Trabajo por cuenta propia / independiente", "No trabajo actualmente"], key="situacion")
+        with col2:
+            st.selectbox("Provincia donde vivís:", list(PROVINCIAS.keys()), key="provincia")
+            st.caption(f"Región EPH asignada: **{region}**")
+            st.selectbox("Nivel educativo máximo alcanzado:", list(EDUCACION.keys()), key="edu")
+            st.radio("Estado civil / Convivencia:", ["Vivo solo/a", "Vivo con mis padres", "Vivo en pareja / Casado/a"], key="pareja")
+        botones("Inicio", "Test")
+
+    # ================= 2. Test =================
+    elif paso == "Test":
+        seccion("Paso 2", "Tu perfil de inversor")
+        col3, col4 = st.columns(2)
+        with col3:
+            st.radio("1. ¿Qué es más importante para vos con esta plata?", OPC_OBJ, key="q_obj")
+            st.selectbox("2. ¿En cuánto tiempo vas a necesitar esta plata?", list(HORIZONTES.keys()), key="horizonte")
+            st.radio("3. ¿Podrías necesitar sacarla antes de ese plazo (por un imprevisto)?", list(LIQ_MIN.keys()), key="liquidez")
+            st.radio("4. Si tu inversión cae un 15% en un mes, ¿qué hacés?", OPC_TOL, key="tolerancia")
+        with col4:
+            st.radio("5. ¿Cuánta pérdida podrías aguantar sin desesperarte?", OPC_PERD, key="perdida")
+            st.radio("6. ¿Qué experiencia tenés invirtiendo?", OPC_EXP, key="experiencia")
+            st.radio("7. Tus ingresos son…", ["Fijos todos los meses", "Variables (cambian mucho)"], key="flujo")
+            st.radio("¿Tenés gastos grandes planificados en los próximos 12 meses (viaje, mudanza, auto…)?", ["Sí", "No"], key="compromisos")
+            st.slider("8. ¿Qué porcentaje de tu ingreso podés separar sin afectar tu vida diaria?", 0, 100, key="retencion")
+        botones("Sobre vos", "Objetivo")
+
+    # ================= 3. Objetivo =================
+    elif paso == "Objetivo":
+        seccion("Paso 3", "Tu objetivo")
+        o1, o2 = st.columns(2)
+        with o1:
+            st.selectbox("¿Para qué es este dinero?", OBJETIVOS, key="objetivo")
+        with o2:
+            st.number_input("¿Cuánto pensás invertir? ($)", min_value=0, step=50000, key="monto")
+        if S["objetivo"].startswith("Priorizar"):
+            st.markdown("**Contanos sobre tus deudas** (para ordenar las prioridades)")
+            d1, d2 = st.columns(2)
+            with d1:
+                st.selectbox("Tipo de deuda principal:", TIPOS_DEUDA, key="tipo_deuda")
+                st.number_input("Monto total adeudado ($):", min_value=0, step=50000, key="monto_deuda")
+            with d2:
+                st.number_input("Costo financiero total anual aproximado (CFT, %). Dejá 0 si no lo sabés:", min_value=0.0, step=1.0, key="cft")
+                st.radio("¿Tenés cuotas atrasadas?", ["No", "Sí"], key="atraso")
+        botones("Test", "Resultado", "Ver mi análisis")
+
+    # ================= 4. Resultado =================
+    elif paso == "Resultado":
+        seccion("Resultados", "Tu análisis")
+        m1, m2, m3 = st.columns(3)
+        if proba_alto_riesgo is None:
+            m1.metric("Riesgo crediticio", "No estimado", "el modelo solo evalúa asalariados", delta_color="off")
+        else:
+            m1.metric("Riesgo crediticio", "Alto" if alto else "Bajo", f"probabilidad de alto riesgo: {proba_alto_riesgo:.1%}", delta_color="off")
+        m2.metric("Tu perfil de inversor", perfil, f"puntaje {total}/16", delta_color="off")
+        m3.metric(f"Perfil para invertir a {horizonte}", perfil_ef, "ajustado por plazo y riesgo" if perfil_ef != perfil else "sin ajustes", delta_color="off")
+        if perfil_ef != perfil:
+            st.info(f"Tu perfil psicológico es {perfil}, pero para invertir a {horizonte}{' y con riesgo crediticio alto' if alto else ''} te conviene actuar como {perfil_ef}: "
+                    "una cosa es cuánto riesgo aguantás y otra cuánto riesgo podés tomar según cuándo necesitás la plata.")
+        st.markdown({"Conservador": "**Conservador:** priorizás cuidar tu plata. Preferís ganar poco pero seguro.",
+                     "Moderado": "**Moderado:** buscás equilibrio. Aceptás algunos altibajos a cambio de ganar más.",
+                     "Agresivo": "**Agresivo:** buscás hacer crecer tu plata y aceptás caídas fuertes en el camino."}[perfil])
+
+        st.subheader("Riesgo crediticio")
+        if es_asalariado:
+            if alto:
+                st.warning(f"ALTO RIESGO (probabilidad: {proba_alto_riesgo:.1%}). Priorizá la liquidez y un fondo de emergencia antes de tomar deuda.")
+            else:
+                st.success(f"BAJO RIESGO (probabilidad: {proba_alto_riesgo:.1%}). Tu perfil laboral es estable para acceder a crédito.")
+            st.caption("Regresión logística entrenada con asalariados de la EPH 1T-2026. La informalidad laboral se usa como aproximación del riesgo crediticio (no mide mora).")
+        else:
+            st.info("El modelo se entrenó con asalariados: no estima un score para cuentapropistas ni para personas sin trabajo. "
+                    "Como criterio prudente, priorizá un fondo de emergencia antes de endeudarte o invertir en activos de riesgo.")
+
+        if not S["situacion"].startswith("No trabajo"):
+            sit_ref = "Asalariado/a" if es_asalariado else "Cuenta propia"
+            fila = ref[(ref["situacion"] == sit_ref) & (ref["region"] == region) & (ref["educ"] == edu_ref)]
+            st.subheader("Tu ingreso frente a la EPH")
+            if len(fila) == 1:
+                f = fila.iloc[0]
+                deciles = f[[f"p{i}" for i in range(10, 100, 10)]].astype(float).values
+
+                def _pos(v):
+                    if v < deciles[0]:
+                        return 5
+                    if v > deciles[-1]:
+                        return 95
+                    return int(np.interp(v, deciles, range(10, 100, 10)))
+                p_lo, p_hi = _pos(lo_usd * tc), _pos(hi_usd * tc)
+                st.write(f"Con un ingreso de {S['tramo'].replace('USD', 'USD ')} (entre {peso(lo_usd * tc)} y {peso(hi_usd * tc)} por mes), estás entre el percentil "
+                         f"**{p_lo}** y el **{p_hi}** de los/as ocupados/as de tu grupo ({sit_ref}, región {region}, nivel educativo {edu_ref}). "
+                         f"Mediana del grupo: **{peso(f['p50'])}** (n = {int(f['n'])} casos en la EPH 1T-2026).")
+                st.caption(f"Tu provincia ({S['provincia']}) se compara con la región EPH {region}. Un percentil 70 significa que ganás más que el 70% de tu grupo.")
+            else:
+                st.write("No hay suficientes casos en la EPH para comparar tu grupo.")
+
+        st.subheader("Cómo se armó tu puntaje")
+        st.table(pd.DataFrame({"Pregunta": ["Objetivo", "Plazo", "Necesidad de liquidez", "Reacción a una caída", "Pérdida aceptable",
+                                            "Experiencia", "Estabilidad de ingresos", "Capacidad de ahorro"],
+                               "Puntos": puntos, "Máximo": [2] * 8}).set_index("Pregunta"))
+        st.caption("0-5 puntos: Conservador · 6-10: Moderado · 11-16: Agresivo.")
+        botones("Objetivo", "Inversiones", "Ver inversiones")
+
+    # ================= 5. Inversiones =================
+    elif paso == "Inversiones":
+        seccion("Estrategia", "Instrumentos sugeridos")
+        if objetivo.startswith("Priorizar"):
+            mostrar_deudas(S["tipo_deuda"], S["monto_deuda"], S["cft"], S["atraso"], alto)
+        else:
+            obj_key = ("emergencia" if objetivo.startswith("Fondo") else "renta" if objetivo.startswith("Generar") else "crecimiento")
+            st.write(f"Combinamos **distintos tipos de inversión** según tu objetivo, tu perfil para invertir (**{perfil_ef}**) y tu plazo (**{horizonte}**). "
+                     f"Los rendimientos se miden en {VENTANA[horizonte]} con datos reales.")
+            with st.spinner("Consultando datos reales de mercado..."):
+                df3, excluidos, origenes = top3_mixto(obj_key, perfil_ef, horizonte)
+            st.write("**Top 3 según el sistema (ordenado de mejor a peor):**")
+            tarjetas_top3(df3)
+            with st.expander("Ver el Top 3 como tabla"):
+                st.table(df3.set_index("Puesto"))
+            st.caption("Orden: primero el tipo de inversión que mejor encaja con tu objetivo y perfil; dentro de cada tipo, el instrumento con mejor "
+                       "rendimiento (TNA) o mejor relación retorno/riesgo. TNA = Tasa Nominal Anual. Rendimientos pasados no garantizan resultados futuros.")
+            for t, o in origenes.items():
+                st.caption(f"{TIPOS[t]['nombre']}: {o}")
+            if excluidos:
+                st.info("No se muestran " + ", ".join(TIPOS[t]["nombre"] + "s" for t in excluidos) +
+                        f" porque necesitan un plazo mínimo ({', '.join(str(TIPOS[t]['min']) + ' meses' for t in excluidos)}) o no encajan con tu perfil: "
+                        "su precio puede estar bajo el que pagaste justo cuando necesitás la plata.")
+
+            if st.checkbox("Ver la clasificación de fondos por TNA y plazo (1 mes, 3 meses, 6 meses y 1 año)", key="ver_plazos"):
+                filas = []
+                with st.spinner("Calculando la TNA en cada plazo..."):
+                    for tipo, etiqueta in (("emergencia", "Fondo de dinero (T+0)"), ("renta", "Fondo de renta fija (T+1)")):
+                        for h in ("1 mes", "3 meses", "6 meses", "1 año"):
+                            try:
+                                d, _m = ranking(tipo, h)
+                                filas.append({"Tipo": etiqueta, "Plazo": h, "Mejor fondo": d["Instrumento"].iloc[0], "TNA (%)": d["TNA (%)"].iloc[0]})
+                            except Exception:
+                                filas.append({"Tipo": etiqueta, "Plazo": h, "Mejor fondo": "sin datos en vivo", "TNA (%)": "-"})
+                st.table(pd.DataFrame(filas).set_index("Tipo"))
+                st.caption("Cada fila es el fondo con mayor TNA medida en esa ventana. Fuente: CAFCI vía ArgentinaDatos.")
+
+            st.markdown("**Sobre cada instrumento**")
+            for t in dict.fromkeys(df3["Tipo"].map({v["nombre"]: k for k, v in TIPOS.items()})):
+                mostrar_explicacion(t)
+            mostrar_fuentes("emergencia")
+            mostrar_fuentes("cedears")
+        botones("Resultado", "Cartera", "Ver mi cartera")
+
+    # ================= 6. Cartera =================
+    elif paso == "Cartera":
+        seccion("Cartera", "Cómo repartir tu plata")
+        cartera = armar_cartera(perfil_ef, horizonte, liquidez)
+        st.write(f"Cartera sugerida para un perfil **{perfil_ef}** a **{horizonte}**. No pongas todos los huevos en la misma canasta: repartir tu plata entre distintos instrumentos reduce el riesgo.")
+        dfc = pd.DataFrame({"Tipo de inversión": [NOMBRE_BUCKET[k] for k in cartera], "% de tu plata": [cartera[k] for k in cartera]})
+        if monto > 0:
+            dfc["Monto ($)"] = [peso_t(monto * cartera[k] / 100) for k in cartera]
+        dfc["Mejor opción hoy"] = [(items_tipo(k, horizonte)[0][0]["Instrumento"] if cartera[k] > 0 else "-") for k in cartera]
+        st.table(dfc.set_index("Tipo de inversión"))
+        st.bar_chart(dfc.set_index("Tipo de inversión")["% de tu plata"])
+        rv = cartera["cedears"] + cartera["acciones"]
+        st.caption(f"Renta variable total (CEDEARs + acciones): {rv}%. Rangos de referencia: conservador 15-40%, moderado 40-60%, agresivo más de 70%.")
+        if MESES_NUM[horizonte] <= 3:
+            st.info(f"Como tu plazo es de {horizonte}, se limitó la renta variable: en plazos cortos las caídas no alcanzan a recuperarse.")
+        if LIQ_MIN[liquidez] > 0:
+            st.info(f"Como podrías necesitar la plata antes de tiempo, se reservó al menos un {LIQ_MIN[liquidez]}% en un fondo de dinero (disponible el mismo día).")
+        if alto:
+            st.info("Tu riesgo crediticio es alto: la cartera se llevó al perfil más prudente.")
+        with st.expander("Así quedan las carteras de los tres perfiles (plazo de 1 año, sin ajustes de liquidez)"):
+            comp = pd.DataFrame({p: armar_cartera(p, "1 año", "No, no la voy a tocar") for p in BASE_CARTERA}).rename(index=NOMBRE_BUCKET)
+            st.table(comp.astype(str) + "%")
+            st.caption("Los porcentajes base se apoyan en los rangos de renta variable por perfil de Rankia y en las carteras modelo de IOL e iProfesional. Son una guía educativa, no una recomendación personalizada.")
+        botones("Inversiones", "Más info", "Más información")
+
+    # ================= 7. Más info =================
+    else:
+        seccion("Más información", "Liquidez, glosario y metodología")
+        st.subheader("¿Qué es la liquidez?")
+        st.write("**Liquidez** es qué tan rápido podés convertir una inversión en plata disponible **sin perder valor**. "
+                 "Una inversión muy líquida te da la plata el mismo día; una poco líquida puede tardar o venderse con pérdida.")
+        st.table(pd.DataFrame({"Instrumento": [v["nombre"] for v in TIPOS.values()], "¿Qué es?": [v["que_es"] for v in TIPOS.values()],
+                               "Riesgo": [v["riesgo"] for v in TIPOS.values()], "¿Cuándo tengo la plata?": [v["liquidez"] for v in TIPOS.values()],
+                               "Plazo mínimo sugerido": [f"{v['min']} mes" + ("es" if v["min"] > 1 else "") for v in TIPOS.values()]}).set_index("Instrumento"))
+        st.markdown("**Palabras que aparecen en la app:**\n\n" + GLOSARIO)
+        st.subheader("Cómo funciona")
+        st.markdown(
+            "1. **Riesgo crediticio:** regresión logística con microdatos de la EPH (INDEC, 1T-2026) de asalariados de 18 a 65 años (11.108 casos). "
+            "Predice la probabilidad de ser informal (36,5% de la muestra), usada como aproximación del riesgo. Exactitud 80,2% y AUC 0,855.\n"
+            "2. **Perfil de inversor:** 8 preguntas basadas en las dimensiones de los tests de Balanz, IOL y Bull Market. Puntaje 0-16.\n"
+            "3. **Top 3:** datos reales de CAFCI (fondos) y Yahoo Finance (CEDEARs y acciones).\n"
+            "4. **Cartera:** porcentajes base por perfil, recortados por plazo y por necesidad de liquidez.")
+        st.warning("Limitaciones: la informalidad no es lo mismo que mora; el modelo solo cubre asalariados; el test no reemplaza una entrevista con un "
+                   "asesor registrado; los rendimientos pasados no garantizan resultados futuros; no incluye bonos individuales ni dólar.")
+        with st.expander("Fuentes del test de perfil y de las carteras"):
+            for nombre, url in FUENTES_TEST:
+                st.markdown(f"- [{nombre}]({url})")
+            st.caption("Los tests de Balanz, IOL y Bull Market son interactivos: de ellos se tomaron las dimensiones que miden, no el texto de sus preguntas.")
+        seccion("Siguiente paso", "¿Dónde operar?")
+        st.write("Para invertir en Argentina conviene operar con Agentes de Liquidación y Compensación (ALyCs) registrados ante la CNV. Antes de operar, verificá su inscripción en la web de la CNV.")
+        c1, c2, c3 = st.columns(3)
+        c1.markdown("### Balanz")
+        c1.write("ALyC con acciones, CEDEARs, ONs y fondos comunes de inversión.")
+        c2.markdown("### IOL (InvertirOnline)")
+        c2.write("ALyC digital con cuenta remunerada y portafolios sugeridos.")
+        c3.markdown("### Mercado Pago / Ualá")
+        c3.write("Billeteras con fondos de inversión de liquidez inmediata para el dinero de uso diario.")
+        st.caption("Herramienta educativa desarrollada para un trabajo práctico. No constituye asesoramiento financiero ni una recomendación de inversión. Los rankings usan datos históricos públicos y no garantizan resultados futuros.")
+        botones("Cartera", None)
+        st.button("Empezar de nuevo", key="reiniciar", on_click=ir, args=("Inicio",))
