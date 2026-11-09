@@ -43,9 +43,15 @@ def _fmt(x, dec=1):
 
 # ───────────────────────── FCI (CAFCI vía ArgentinaDatos) ─────────────────────────
 def _get_json(url):
-    r = requests.get(url, timeout=20)
-    r.raise_for_status()
-    return r.json()
+    ultimo = None
+    for _ in range(3):   # hasta 3 intentos: las APIs gratuitas a veces tardan o fallan una vez
+        try:
+            r = requests.get(url, timeout=25, headers={"User-Agent": "asesor-financiero-tp/1.0"})
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            ultimo = e
+    raise ultimo
 
 
 def _fci_en_fecha(categoria, fecha_objetivo):
@@ -59,6 +65,9 @@ def _fci_en_fecha(categoria, fecha_objetivo):
         if data:
             return pd.DataFrame(data)
     raise SinDatos(f"No hay datos de FCI ({categoria}) cerca de {fecha_objetivo}")
+
+
+PLAZOS_FCI = {"mercadoDinero": "T+0 (mismo día)", "rentaFija": "T+1 (24 h hábiles)"}
 
 
 def top_fci(categoria, dias=30, n=3):
@@ -100,7 +109,8 @@ def top_fci(categoria, dias=30, n=3):
         porque = (f"TNA de {_fmt(r['tna'])}% en {dias_reales} días (valor cuotaparte {_fmt(r['vcp0'], 4)} → {_fmt(r['vcp1'], 4)}), "
                   f"frente a una mediana de {_fmt(mediana_tna)}% en su categoría. "
                   f"Patrimonio de ${_fmt(r['patrimonio'] / 1e9)} mil millones, por encima de la mediana de la categoría (mayor escala).")
-        filas.append({"Puesto": i + 1, "Instrumento": r["fondo"], "TNA (%)": round(float(r["tna"]), 1), "Por qué está en el top 3": porque})
+        filas.append({"Puesto": i + 1, "Instrumento": r["fondo"], "TNA (%)": round(float(r["tna"]), 1),
+                      "Plazo de rescate": PLAZOS_FCI.get(categoria, "Ver reglamento del fondo"), "Por qué está en el top 3": porque})
     meta = {"fuente": "CAFCI vía ArgentinaDatos", "fecha": f"{fecha1:%d/%m/%Y}",
             "criterio": f"mayor TNA a {dias_reales} días entre fondos con patrimonio ≥ mediana de la categoría"}
     return pd.DataFrame(filas), meta
@@ -116,13 +126,13 @@ def _descargar_precios(tickers, periodo="1y"):
     return precios
 
 
-def top_mercado(universo, n=3):
+def top_mercado(universo, n=3, periodo="1y"):
     """Top n de un universo {ticker: nombre} ordenado por ratio retorno anualizado / volatilidad anualizada."""
     try:
-        precios = _descargar_precios(list(universo.keys()))
+        precios = _descargar_precios(list(universo.keys()), periodo)
     except Exception as e:
         raise SinDatos(f"No se pudo consultar Yahoo Finance: {e}")
-    precios = precios.dropna(axis=1, thresh=120)       # solo activos con al menos ~6 meses de datos
+    precios = precios.dropna(axis=1, thresh=int(0.8 * len(precios)))   # solo activos con datos en al menos el 80% del período
     if precios.shape[1] < n:
         raise SinDatos("Datos insuficientes de precios")
 
@@ -144,7 +154,8 @@ def top_mercado(universo, n=3):
                   f"ratio retorno/riesgo de {_fmt(r['ratio'], 2)} (mediana del grupo: {_fmt(mediana_ratio, 2)}). "
                   f"Caída máxima del período: {_fmt(r['mdd'] * 100, 0)}%.")
         salida.append({"Puesto": i + 1, "Instrumento": universo[r["ticker"]],
-                       "Retorno anual (%)": round(float(r["ret"] * 100), 1), "Por qué está en el top 3": porque})
-    meta = {"fuente": "Yahoo Finance (precios en pesos, últimos 12 meses)", "fecha": f"{precios.index[-1]:%d/%m/%Y}",
+                       "Retorno anual (%)": round(float(r["ret"] * 100), 1),
+                       "Plazo de liquidación": "T+1 (24 h)", "Por qué está en el top 3": porque})
+    meta = {"fuente": f"Yahoo Finance (precios en pesos, período {periodo})", "fecha": f"{precios.index[-1]:%d/%m/%Y}",
             "criterio": "mayor ratio retorno anualizado / volatilidad anualizada"}
     return pd.DataFrame(salida), meta
